@@ -1,0 +1,31 @@
+/* ============================================
+   ONE BUTTON HEIST — Stylesheet
+   Dark retro minimal aesthetic
+   ============================================ */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #0a0a0a;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  overflow: hidden;
+  font-family: 'Courier New', Courier, monospace;
+}
+
+canvas {
+  display: block;
+  /* Neon green border gives the retro "terminal screen" feel */
+  border: 2px solid #00ff88;
+  box-shadow:
+    0 0 10px #00ff88,
+    0 0 30px #00ff8844,
+    inset 0 0 20px #00000088;
+  cursor: crosshair;
+}
