@@ -423,8 +423,8 @@ function checkGoal() {
   const inMouth = ball.y > GOAL_TOP && ball.y < GOAL_BOT;
   if (!inMouth) return;
 
-  if (ball.x - BALL_R < FL - GOAL_D) goalScored(1);  // red scores
-  if (ball.x + BALL_R > FR + GOAL_D) goalScored(0);  // blue scores
+  if (ball.x - BALL_R < FL) goalScored(1);  // red scores — surface past goal line
+  if (ball.x + BALL_R > FR) goalScored(0);  // blue scores — surface past goal line
 }
 
 function goalScored(team) {
