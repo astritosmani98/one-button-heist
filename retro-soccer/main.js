@@ -31,6 +31,8 @@ const GOAL_D   = 18;    // goal depth (behind the line)
 const GOAL_TOP = FCY - GOAL_H / 2;
 const GOAL_BOT = FCY + GOAL_H / 2;
 
+const CORNER_R = 32;    // field corner arc radius (visual + collision)
+
 // ── Tuning Constants ──────────────────────────────────────────
 const PLAYER_R    = 13;    // player radius
 const P_SPEED     = 195;   // normal speed (px/s)
@@ -383,6 +385,30 @@ function updateBall(dt) {
     if (ball.x - BALL_R < FL) { ball.x = FL + BALL_R; ball.vx =  Math.abs(ball.vx) * 0.72; }
     if (ball.x + BALL_R > FR) { ball.x = FR - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.72; }
   }
+
+  // Corner arc bounce — reflects ball off the rounded corner boundary
+  for (const c of CORNER_CENTERS) {
+    const dx = ball.x - c.cx;
+    const dy = ball.y - c.cy;
+    const inZone = (c.cx < FCX ? dx < 0 : dx > 0) &&
+                   (c.cy < FCY ? dy < 0 : dy > 0);
+    if (!inZone) continue;
+
+    const d = Math.hypot(dx, dy);
+    const minD = CORNER_R + BALL_R;
+    if (d < minD && d > 0) {
+      const nx = dx / d, ny = dy / d;
+      // Push ball to arc surface
+      ball.x = c.cx + nx * minD;
+      ball.y = c.cy + ny * minD;
+      // Reflect velocity off arc normal (only if moving into the corner)
+      const dot = ball.vx * nx + ball.vy * ny;
+      if (dot < 0) {
+        ball.vx -= 2 * dot * nx * 0.72;
+        ball.vy -= 2 * dot * ny * 0.72;
+      }
+    }
+  }
 }
 
 // ── Goal Detection ────────────────────────────────────────────
@@ -404,9 +430,46 @@ function goalScored(team) {
 // ── Helpers ───────────────────────────────────────────────────
 function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
 function clamp(v, lo, hi)     { return Math.max(lo, Math.min(hi, v)); }
+
+// Corner arc centres (inside the field, one per corner)
+const CORNER_CENTERS = [
+  { cx: FL + CORNER_R, cy: FT + CORNER_R },  // top-left
+  { cx: FR - CORNER_R, cy: FT + CORNER_R },  // top-right
+  { cx: FL + CORNER_R, cy: FB - CORNER_R },  // bottom-left
+  { cx: FR - CORNER_R, cy: FB - CORNER_R },  // bottom-right
+];
+
+// Push an entity out of the cut-off corner zones.
+// A corner zone is the quadrant region (toward the field corner from the arc centre)
+// where the rounded boundary is active. Entities are slid along the arc so they
+// never get wedged into a 90° pocket.
+function applyCornerConstraint(obj, minDist) {
+  for (const c of CORNER_CENTERS) {
+    const dx = obj.x - c.cx;
+    const dy = obj.y - c.cy;
+    // Entity is only affected when it's in the quadrant pointing toward the corner
+    const inZone = (c.cx < FCX ? dx < 0 : dx > 0) &&
+                   (c.cy < FCY ? dy < 0 : dy > 0);
+    if (!inZone) continue;
+
+    const d = Math.hypot(dx, dy);
+    if (d < minDist) {
+      if (d > 0) {
+        obj.x = c.cx + (dx / d) * minDist;
+        obj.y = c.cy + (dy / d) * minDist;
+      } else {
+        // Exactly at arc centre — nudge diagonally outward
+        obj.x = c.cx + (c.cx < FCX ? -1 : 1) * minDist * 0.707;
+        obj.y = c.cy + (c.cy < FCY ? -1 : 1) * minDist * 0.707;
+      }
+    }
+  }
+}
+
 function clampField(p) {
-  p.x = clamp(p.x, FL + p.radius || FL + PLAYER_R, FR - (p.radius || PLAYER_R));
+  p.x = clamp(p.x, FL + PLAYER_R, FR - PLAYER_R);
   p.y = clamp(p.y, FT + PLAYER_R, FB - PLAYER_R);
+  applyCornerConstraint(p, CORNER_R);   // slide player along corner arc
 }
 
 // ── RENDER ────────────────────────────────────────────────────
@@ -427,13 +490,29 @@ function render() {
   ctx.restore();
 }
 
+// ── Utility: Rounded rectangle path ───────────────────────────
+function roundedRectPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x,     y + h, r);
+  ctx.arcTo(x,     y + h, x,     y,     r);
+  ctx.arcTo(x,     y,     x + w, y,     r);
+  ctx.closePath();
+}
+
 // ── Draw: Field ───────────────────────────────────────────────
 function drawField() {
   // Outside area (dark)
   ctx.fillStyle = '#0e0e0e';
   ctx.fillRect(0, 0, W, H);
 
-  // Alternating grass stripes
+  // Clip everything to the rounded field rectangle
+  ctx.save();
+  roundedRectPath(FL, FT, FR - FL, FB - FT, CORNER_R);
+  ctx.clip();
+
+  // Alternating grass stripes (inside clip)
   const fw = FR - FL;
   const sw = fw / 8;
   for (let i = 0; i < 8; i++) {
@@ -441,11 +520,15 @@ function drawField() {
     ctx.fillRect(FL + i * sw, FT, sw, FB - FT);
   }
 
+  ctx.restore(); // remove clip
+
+  // Field markings (drawn after clip so they don't get cut)
   ctx.strokeStyle = 'rgba(255,255,255,0.85)';
   ctx.lineWidth   = 2;
 
-  // Border
-  ctx.strokeRect(FL, FT, FR - FL, FB - FT);
+  // Rounded border
+  roundedRectPath(FL, FT, FR - FL, FB - FT, CORNER_R);
+  ctx.stroke();
 
   // Halfway line
   ctx.beginPath(); ctx.moveTo(FCX, FT); ctx.lineTo(FCX, FB); ctx.stroke();
