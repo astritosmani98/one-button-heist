@@ -1,0 +1,17 @@
+/* Retro Soccer 3v3 — styles */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #111;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+canvas {
+  display: block;
+  border: 3px solid #fff;
+  box-shadow: 0 0 20px rgba(255,255,255,0.15);
+}
