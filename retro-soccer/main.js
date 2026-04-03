@@ -410,10 +410,12 @@ function updateBall(dt) {
     if (ball.x + BALL_R > FR) { ball.x = FR - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.72; }
   }
 
-  // ── Step 3: hard-clamp safety net (no velocity change — just prevents
-  // the ball escaping the field rectangle under any edge case)
-  ball.x = clamp(ball.x, FL + BALL_R, FR - BALL_R);
+  // ── Step 3: hard-clamp safety net (no velocity change)
+  // y always clamped; x skipped inside goal mouth so the ball can score
   ball.y = clamp(ball.y, FT + BALL_R, FB - BALL_R);
+  if (!(ball.y > GOAL_TOP && ball.y < GOAL_BOT)) {
+    ball.x = clamp(ball.x, FL + BALL_R, FR - BALL_R);
+  }
 }
 
 // ── Goal Detection ────────────────────────────────────────────
