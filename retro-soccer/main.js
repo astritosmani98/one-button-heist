@@ -31,7 +31,7 @@ const GOAL_D   = 18;    // goal depth (behind the line)
 const GOAL_TOP = FCY - GOAL_H / 2;
 const GOAL_BOT = FCY + GOAL_H / 2;
 
-const CORNER_R = 32;    // field corner arc radius (visual + collision)
+const CORNER_R = 50;    // field corner arc radius (visual + collision)
 
 // ── Tuning Constants ──────────────────────────────────────────
 const PLAYER_R    = 13;    // player radius
@@ -375,18 +375,10 @@ function updateBall(dt) {
   ball.x += ball.vx * dt;
   ball.y += ball.vy * dt;
 
-  // Top / bottom walls
-  if (ball.y - BALL_R < FT) { ball.y = FT + BALL_R; ball.vy =  Math.abs(ball.vy) * 0.72; }
-  if (ball.y + BALL_R > FB) { ball.y = FB - BALL_R; ball.vy = -Math.abs(ball.vy) * 0.72; }
-
-  // Left / right walls — allow ball into goal mouth
-  const inGoalMouth = ball.y > GOAL_TOP && ball.y < GOAL_BOT;
-  if (!inGoalMouth) {
-    if (ball.x - BALL_R < FL) { ball.x = FL + BALL_R; ball.vx =  Math.abs(ball.vx) * 0.72; }
-    if (ball.x + BALL_R > FR) { ball.x = FR - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.72; }
-  }
-
-  // Corner arc bounce — reflects ball off the rounded corner boundary
+  // ── Step 1: corner arc bounces (run BEFORE straight walls)
+  // minD = CORNER_R - BALL_R ensures this constraint never pushes the ball
+  // outside the rectangular bounds (wall-clamped position is always further
+  // than minD from every arc centre — no oscillation possible).
   for (const c of CORNER_CENTERS) {
     const dx = ball.x - c.cx;
     const dy = ball.y - c.cy;
@@ -394,14 +386,12 @@ function updateBall(dt) {
                    (c.cy < FCY ? dy < 0 : dy > 0);
     if (!inZone) continue;
 
-    const d = Math.hypot(dx, dy);
-    const minD = CORNER_R + BALL_R;
+    const d   = Math.hypot(dx, dy);
+    const minD = CORNER_R - BALL_R;
     if (d < minD && d > 0) {
       const nx = dx / d, ny = dy / d;
-      // Push ball to arc surface
       ball.x = c.cx + nx * minD;
       ball.y = c.cy + ny * minD;
-      // Reflect velocity off arc normal (only if moving into the corner)
       const dot = ball.vx * nx + ball.vy * ny;
       if (dot < 0) {
         ball.vx -= 2 * dot * nx * 0.72;
@@ -409,6 +399,21 @@ function updateBall(dt) {
       }
     }
   }
+
+  // ── Step 2: straight wall bounces
+  if (ball.y - BALL_R < FT) { ball.y = FT + BALL_R; ball.vy =  Math.abs(ball.vy) * 0.72; }
+  if (ball.y + BALL_R > FB) { ball.y = FB - BALL_R; ball.vy = -Math.abs(ball.vy) * 0.72; }
+
+  const inGoalMouth = ball.y > GOAL_TOP && ball.y < GOAL_BOT;
+  if (!inGoalMouth) {
+    if (ball.x - BALL_R < FL) { ball.x = FL + BALL_R; ball.vx =  Math.abs(ball.vx) * 0.72; }
+    if (ball.x + BALL_R > FR) { ball.x = FR - BALL_R; ball.vx = -Math.abs(ball.vx) * 0.72; }
+  }
+
+  // ── Step 3: hard-clamp safety net (no velocity change — just prevents
+  // the ball escaping the field rectangle under any edge case)
+  ball.x = clamp(ball.x, FL + BALL_R, FR - BALL_R);
+  ball.y = clamp(ball.y, FT + BALL_R, FB - BALL_R);
 }
 
 // ── Goal Detection ────────────────────────────────────────────
@@ -467,9 +472,12 @@ function applyCornerConstraint(obj, minDist) {
 }
 
 function clampField(p) {
+  // Corner arc first — minDist = CORNER_R - PLAYER_R guarantees no conflict
+  // with the subsequent rectangular clamp (the wall-clamped position is always
+  // further than minDist from any corner arc centre).
+  applyCornerConstraint(p, CORNER_R - PLAYER_R);
   p.x = clamp(p.x, FL + PLAYER_R, FR - PLAYER_R);
   p.y = clamp(p.y, FT + PLAYER_R, FB - PLAYER_R);
-  applyCornerConstraint(p, CORNER_R);   // slide player along corner arc
 }
 
 // ── RENDER ────────────────────────────────────────────────────
