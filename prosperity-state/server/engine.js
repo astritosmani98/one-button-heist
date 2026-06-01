@@ -53,6 +53,39 @@ export function nextInfraCost(state, category) {
   return Math.max(1, Math.floor(CONFIG.INFRA_BASE_COST * nextLevel * (1 - energyDiscount(state))));
 }
 
+/**
+ * Minimum total Coins the nation must pool this round to build & avoid decay.
+ * Scales with the number of living citizens and their income (so it stays
+ * meaningful as the economy grows).
+ */
+export function roundThreshold(state) {
+  const income = computeIncome(state);
+  const n = alivePlayers(state).length || 1;
+  return Math.ceil(income * n * CONFIG.MAINTENANCE_FRACTION);
+}
+
+/** Prosperity lost when the maintenance threshold is missed (grows late-game). */
+export function neglectPenalty(state) {
+  return CONFIG.NEGLECT_BASE + Math.floor(state.prosperity / CONFIG.NEGLECT_SCALE_DIV);
+}
+
+/** The category the focus would move to next (next un-maxed, wrapping). */
+export function nextFocusCategory(state) {
+  const cats = CONFIG.INFRA_CATEGORIES;
+  for (let i = 1; i <= cats.length; i++) {
+    const idx = (state.focusIndex + i) % cats.length;
+    if (state.infrastructure[cats[idx]] < CONFIG.INFRA_MAX_LEVEL) return cats[idx];
+  }
+  return state.infraFocus; // everything maxed
+}
+
+/** Rotate the build focus to the next un-maxed category. */
+function advanceFocus(state) {
+  const next = nextFocusCategory(state);
+  state.focusIndex = CONFIG.INFRA_CATEGORIES.indexOf(next);
+  state.infraFocus = next;
+}
+
 // ----------------------------------------------------------------------------
 // Game creation
 // ----------------------------------------------------------------------------
@@ -72,6 +105,7 @@ export function createGame(seats) {
       income: 0,
       influence: CONFIG.MIN_INFLUENCE,
       contributedThisRound: null, // null = not submitted yet
+      lastContribution: null,     // what they gave in the most recent resolved round
       submitted: false,
       alive: true,
       bankrupt: false,
@@ -84,8 +118,10 @@ export function createGame(seats) {
     prosperity: CONFIG.START_PROSPERITY,
     players,
     infrastructure: { roads: 0, education: 0, energy: 0, healthcare: 0, industry: 0 },
-    infraProgress: 0,
+    infraProgress: { roads: 0, education: 0, energy: 0, healthcare: 0, industry: 0 },
     infraFocus: 'roads',
+    focusIndex: 0,        // index into INFRA_CATEGORIES; advances each round
+    roundIncome: 0,       // income paid this round (for the maintenance threshold)
     taxPolicy: 'flat',        // 'flat' | 'progressive'
     welfarePolicy: 'expansion', // 'expansion' | 'welfare'
     votesHeld: 0,
@@ -108,14 +144,16 @@ function logEvent(state, text) {
 export function beginRound(state) {
   state.round += 1;
   state.phase = 'contribute';
+  if (state.round > 1) advanceFocus(state); // rotate which project we build (round 1 stays on Roads)
   const income = computeIncome(state);
+  state.roundIncome = income;
   for (const p of alivePlayers(state)) {
     p.income = income;
     p.coins += income;
     p.contributedThisRound = null;
     p.submitted = false;
   }
-  logEvent(state, `Round ${state.round} begins. Income this round: ${income} Coins each (Prosperity ${state.prosperity}).`);
+  logEvent(state, `Round ${state.round} begins. Income ${income} each. Build focus: ${capitalize(state.infraFocus)}. Minimum to build: ${roundThreshold(state)} Coins.`);
   return state;
 }
 
@@ -152,6 +190,7 @@ export function resolveRound(state, rng = Math.random) {
     const c = p.contributedThisRound;
     p.coins -= c;
     contributions[p.id] = c;
+    p.lastContribution = c; // persisted so the UI can always show who gave what
     pool += c;
   }
 
@@ -176,12 +215,43 @@ export function resolveRound(state, rng = Math.random) {
   }
   const prosperityPool = pool - welfareAmount;
 
-  // 4) Prosperity growth.  K = max(4, 16 - floor(C/3)); ΔP = floor(C/K) * education.
-  const K = Math.max(CONFIG.K_FLOOR, CONFIG.K_BASE - Math.floor(prosperityPool / CONFIG.K_DIVISOR));
-  const eduMult = 1 + CONFIG.EDUCATION_DP_BONUS_PER_LEVEL * state.infrastructure.education;
-  const deltaP = Math.floor((prosperityPool / K) * eduMult);
+  // 4) Maintenance check + Prosperity growth.
+  //    If the nation pools less than the minimum, NOTHING is built this round and
+  //    Prosperity slips backwards from neglect. Otherwise it grows via K/ΔP and the
+  //    pool accrues toward the round's focused project.
+  const threshold = roundThreshold(state);
+  const belowThreshold = pool < threshold;
   const prosperityBefore = state.prosperity;
-  state.prosperity += deltaP;
+  const upgrades = [];
+  let K = 0;
+  let deltaP;
+  let neglect = 0;
+
+  if (belowThreshold) {
+    neglect = neglectPenalty(state);
+    deltaP = -neglect;                  // construction halted; society decays
+    state.prosperity += deltaP;
+  } else {
+    K = Math.max(CONFIG.K_FLOOR, CONFIG.K_BASE - Math.floor(prosperityPool / CONFIG.K_DIVISOR));
+    const eduMult = 1 + CONFIG.EDUCATION_DP_BONUS_PER_LEVEL * state.infrastructure.education;
+    deltaP = Math.floor((prosperityPool / K) * eduMult);
+    state.prosperity += deltaP;
+
+    // Whole pool accrues toward the current focus category; level up while affordable.
+    const cat = state.infraFocus;
+    state.infraProgress[cat] += pool;
+    let safety = 0;
+    while (
+      state.infrastructure[cat] < CONFIG.INFRA_MAX_LEVEL &&
+      state.infraProgress[cat] >= nextInfraCost(state, cat) &&
+      safety++ < 10
+    ) {
+      const cost = nextInfraCost(state, cat);
+      state.infraProgress[cat] -= cost;
+      state.infrastructure[cat] += 1;
+      upgrades.push({ category: cat, level: state.infrastructure[cat], cost });
+    }
+  }
 
   // 5) Negative event (after contributions, before win check).
   let event = null;
@@ -235,20 +305,8 @@ export function resolveRound(state, rng = Math.random) {
     );
   }
 
-  // 10) Infrastructure progress & upgrades (whole pool counts toward focus).
-  const upgrades = [];
-  state.infraProgress += pool;
-  let safety = 0;
-  while (
-    state.infrastructure[state.infraFocus] < CONFIG.INFRA_MAX_LEVEL &&
-    state.infraProgress >= nextInfraCost(state, state.infraFocus) &&
-    safety++ < 10
-  ) {
-    const cost = nextInfraCost(state, state.infraFocus);
-    state.infraProgress -= cost;
-    state.infrastructure[state.infraFocus] += 1;
-    upgrades.push({ category: state.infraFocus, level: state.infrastructure[state.infraFocus], cost });
-  }
+  // (Infrastructure progress & upgrades are handled in the maintenance check above,
+  //  so they only happen on rounds that meet the minimum contribution.)
 
   // 11) Bankruptcy — Coins can never go below 0; hitting 0 eliminates a player.
   const bankrupted = [];
@@ -269,6 +327,10 @@ export function resolveRound(state, rng = Math.random) {
     prosperityAfter: state.prosperity,
     K,
     pool,
+    threshold,
+    belowThreshold,
+    neglect,
+    focus: state.infraFocus,
     taxLevy,
     taxPayer,
     welfareAmount,
@@ -282,7 +344,11 @@ export function resolveRound(state, rng = Math.random) {
   state.lastRoundResult = result;
 
   // Narrative log.
-  logEvent(state, `Round ${state.round} resolved: pool ${pool} Coins → +${deltaP} Prosperity (cost K=${K}). Prosperity now ${state.prosperity}.`);
+  if (belowThreshold) {
+    logEvent(state, `Round ${state.round}: only ${pool}/${threshold} Coins pooled — below minimum. Nothing built, −${neglect} Prosperity. Now ${state.prosperity}.`);
+  } else {
+    logEvent(state, `Round ${state.round} resolved: pool ${pool} Coins → +${deltaP} Prosperity (cost K=${K}). Prosperity now ${state.prosperity}.`);
+  }
   if (event) logEvent(state, `⚠ ${event.name}: -${event.damage} Prosperity${event.mitigated ? ` (healthcare absorbed ${event.mitigated})` : ''}.`);
   for (const u of upgrades) logEvent(state, `🏗 ${capitalize(u.category)} upgraded to level ${u.level}.`);
   for (const t of topContributors) logEvent(state, `⭐ ${t.name} was top contributor (+${t.refund} Coin refund).`);
@@ -319,7 +385,8 @@ export function getRanking(state) {
 // Voting system
 // ----------------------------------------------------------------------------
 
-const VOTE_CYCLE = ['infraFocus', 'taxPolicy', 'welfarePolicy'];
+// The build focus now auto-rotates every round, so votes cover policy only.
+const VOTE_CYCLE = ['taxPolicy', 'welfarePolicy'];
 
 /** Whether a voting phase should trigger after the round that just resolved. */
 export function shouldVote(state) {
@@ -329,13 +396,7 @@ export function shouldVote(state) {
 export function startVote(state) {
   const type = VOTE_CYCLE[state.votesHeld % VOTE_CYCLE.length];
   let prompt, options;
-  if (type === 'infraFocus') {
-    prompt = 'Which national project should receive our investment focus?';
-    options = CONFIG.INFRA_CATEGORIES.map((c) => ({
-      id: c,
-      label: `${capitalize(c)} (Lv ${state.infrastructure[c]}) — ${INFRA_BLURB[c]}`,
-    }));
-  } else if (type === 'taxPolicy') {
+  if (type === 'taxPolicy') {
     prompt = 'Set the tax policy for the coming rounds.';
     options = [
       { id: 'flat', label: 'Flat — no forced contributions; full personal freedom.' },

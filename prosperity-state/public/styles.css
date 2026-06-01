@@ -169,7 +169,16 @@ input:focus { outline: none; border-color: var(--gold); }
 .lr-bad { color: var(--red); }
 .lr-gold { color: var(--gold); }
 
+/* threshold / maintenance note */
+.threshold-note {
+  background: rgba(245,196,81,.08); border: 1px solid var(--gold-deep);
+  border-radius: 10px; padding: 9px 11px; margin: 4px 0 12px;
+  font-size: .82rem; line-height: 1.4; color: var(--text);
+}
+.threshold-note b { color: var(--gold); }
+
 /* infrastructure */
+.infra-meta { font-size: .8rem; line-height: 1.5; color: var(--muted); margin: -4px 0 12px; }
 .infra-list { display: flex; flex-direction: column; gap: 9px; }
 .infra-row { display: grid; grid-template-columns: 92px 1fr auto; gap: 8px; align-items: center; font-size: .85rem; }
 .infra-row .iname { text-transform: capitalize; }

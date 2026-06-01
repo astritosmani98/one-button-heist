@@ -173,6 +173,10 @@ function renderPlayers(s) {
   const body = $('players-body');
   body.innerHTML = '';
   const sorted = [...s.players].sort((a, b) => b.coins - a.coins);
+
+  // Highest last contribution → mark with a star so the top giver is obvious.
+  const topGave = Math.max(0, ...s.players.map((p) => p.lastContribution || 0));
+
   for (const p of sorted) {
     const tr = document.createElement('tr');
     if (p.id === me.id) tr.classList.add('me');
@@ -182,22 +186,28 @@ function renderPlayers(s) {
     if (p.isBot) tags += '<span class="tag bot">AI</span>';
     if (p.isHost) tags += '<span class="tag host">host</span>';
 
+    // "Gave" persists across rounds. During the contribute phase, also show whether
+    // THIS round's contribution is locked in (amount stays hidden until resolve).
+    let gave;
+    if (p.lastContribution == null) gave = '<span class="muted">—</span>';
+    else {
+      const star = p.lastContribution === topGave && topGave > 0 ? ' <span title="Top contributor">⭐</span>' : '';
+      gave = `<b class="coins-cell">${p.lastContribution}</b>${star}`;
+    }
+
     // Status depends on phase.
     let status = '';
-    if (!p.alive) status = 'bankrupt';
+    if (!p.alive) status = '<span class="tag waiting">bankrupt</span>';
     else if (s.phase === 'contribute') status = p.submitted
-      ? '<span class="tag locked">ready</span>' : '<span class="tag waiting">…</span>';
+      ? '<span class="tag locked">ready</span>' : '<span class="tag waiting">deciding…</span>';
     else if (s.phase === 'vote') status = p.voted
-      ? '<span class="tag locked">voted</span>' : '<span class="tag waiting">…</span>';
-    else if (s.lastRoundResult) {
-      const c = s.lastRoundResult.contributions.find((x) => x.id === p.id);
-      status = c ? `gave ${c.amount}` : '';
-    }
+      ? '<span class="tag locked">voted</span>' : '<span class="tag waiting">deciding…</span>';
 
     tr.innerHTML = `
       <td>${escapeHtml(p.name)}${p.id === me.id ? ' (you)' : ''}${tags}</td>
       <td class="coins-cell">${p.coins}</td>
       <td>${p.influence}</td>
+      <td>${gave}</td>
       <td>${status}</td>`;
     body.appendChild(tr);
   }
@@ -205,6 +215,12 @@ function renderPlayers(s) {
 
 const INFRA_ORDER = ['roads', 'education', 'energy', 'healthcare', 'industry'];
 function renderInfra(s) {
+  // Meta line: current focus, what's next, and this round's minimum-to-build.
+  $('infra-meta').innerHTML =
+    `Building now: <b>${cap(s.infraFocus)}</b> · next: ${cap(s.infraNextFocus)}<br>` +
+    `Min to build this round: <b class="lr-gold">${s.roundThreshold}</b> Coins ` +
+    `<span class="muted">(below it → no build, −${s.neglectPenalty} Prosperity)</span>`;
+
   const wrap = $('infra-list');
   wrap.innerHTML = '';
   for (const cat of INFRA_ORDER) {
@@ -213,9 +229,10 @@ function renderInfra(s) {
     row.className = 'infra-row' + (cat === s.infraFocus ? ' focus' : '');
     let pips = '';
     for (let i = 0; i < s.infraMaxLevel; i++) pips += `<span class="pip ${i < level ? 'on' : ''}"></span>`;
-    const progress = cat === s.infraFocus && level < s.infraMaxLevel
-      ? `<span class="infra-progress">${s.infraProgress}/${s.infraNextCost}</span>`
-      : (level >= s.infraMaxLevel ? '<span class="infra-progress">MAX</span>' : '');
+    // Every category shows its own accumulated progress now (they build independently).
+    const progress = level >= s.infraMaxLevel
+      ? '<span class="infra-progress">MAX</span>'
+      : `<span class="infra-progress">${s.infraProgress[cat]}/${s.infraCosts[cat]}</span>`;
     row.innerHTML = `<span class="iname">${cat}</span><span class="pips">${pips}</span>${progress}`;
     wrap.appendChild(row);
   }
@@ -231,7 +248,12 @@ function renderLastRound(s) {
   const r = s.lastRoundResult;
   if (!r) { el.innerHTML = '<span class="muted">The first round hasn\'t resolved yet.</span>'; return; }
   const lines = [];
-  lines.push(`<div class="lr-line">Citizens pooled <b class="lr-gold">${r.pool}</b> Coins → <b class="lr-good">+${r.deltaP}</b> Prosperity <span class="muted">(cost K=${r.K})</span></div>`);
+  if (r.belowThreshold) {
+    lines.push(`<div class="lr-line lr-bad">⛔ Pooled only <b>${r.pool}</b> / ${r.threshold} needed — nothing built, <b>−${r.neglect}</b> Prosperity (neglect).</div>`);
+  } else {
+    lines.push(`<div class="lr-line">Citizens pooled <b class="lr-gold">${r.pool}</b> Coins <span class="muted">(min ${r.threshold})</span> → <b class="lr-good">+${r.deltaP}</b> Prosperity <span class="muted">(K=${r.K})</span></div>`);
+    lines.push(`<div class="lr-line muted">Built toward: ${cap(r.focus)}</div>`);
+  }
   if (r.taxLevy > 0) lines.push(`<div class="lr-line">Progressive levy: ${r.taxPayer} paid <b>${r.taxLevy}</b></div>`);
   if (r.welfareAmount > 0) lines.push(`<div class="lr-line">Welfare: <b>${r.welfareAmount}</b> Coins to ${r.welfareRecipient}</div>`);
   if (r.topContributors.length) {
@@ -294,6 +316,8 @@ function renderContributeUI(s, card) {
   card.innerHTML = `
     <h3>Your move — Round ${s.round}</h3>
     <p class="muted">You earned <b style="color:var(--gold)">${income}</b> income. How much do you give to the nation?</p>
+    <div class="threshold-note">🏗 Citizens must pool <b>${s.roundThreshold}</b> Coins together this round to build
+      <b>${cap(s.infraFocus)}</b> — fall short and Prosperity drops <b>${s.neglectPenalty}</b> with no construction.</div>
     <div class="contribute-ui">
       <div class="split"><span>Keep <b id="keep-amt">${income - pendingContribution}</b></span><span>Contribute <b id="give-amt">${pendingContribution}</b></span></div>
       <input id="contrib-range" type="range" min="0" max="${income}" value="${pendingContribution}" />
@@ -365,6 +389,7 @@ $('btn-again').onclick = () => { clearSession(); location.reload(); };
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+function cap(s) { return String(s || '').charAt(0).toUpperCase() + String(s || '').slice(1); }
 
 // On load, attempt to resume an in-progress game.
 tryReconnect();

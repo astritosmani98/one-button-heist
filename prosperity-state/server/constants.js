@@ -29,11 +29,20 @@ export const CONFIG = {
   // --- Voting ---
   VOTING_INTERVAL: 3,          // a voting phase occurs every N rounds
 
+  // --- Minimum collective contribution (maintenance) ---
+  // Each round the nation must pool at least this fraction of total potential
+  // income, or nothing is built and Prosperity decays from neglect.
+  MAINTENANCE_FRACTION: 0.35,  // threshold = ceil(income * livingPlayers * fraction)
+  NEGLECT_BASE: 3,             // Prosperity lost when the threshold is missed ...
+  NEGLECT_SCALE_DIV: 20,       // ... plus floor(Prosperity / this) so neglect bites harder later
+
   // --- Infrastructure ---
   INFRA_MAX_LEVEL: 5,
   // Cost (in accumulated contribution progress) to reach the *next* level L.
   INFRA_BASE_COST: 40,         // cost(nextLevel) = INFRA_BASE_COST * nextLevel * (1 - energyDiscount)
   INFRA_CATEGORIES: ['roads', 'education', 'energy', 'healthcare', 'industry'],
+  // The build focus auto-rotates to the next un-maxed category every round, so
+  // construction spreads across all national projects over the game.
 
   // Per-level infrastructure effects (level 0..5)
   ROADS_INCOME_PER_LEVEL: 2,        // +2 Base Income per Roads level

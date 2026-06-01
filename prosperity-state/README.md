@@ -30,13 +30,17 @@ process with no database.
 1. **Income** — each citizen earns `floor(BaseIncome × (1 + Prosperity/40))`.
    Income rises as the nation prospers (and with the Roads project).
 2. **Contribute** — secretly split your income between *keep* and *contribute*.
-   Contributions are revealed only after everyone has locked in.
-3. **Resolve** — the shared pool raises Prosperity. Generous rounds are far more
-   efficient: `K = max(4, 16 − floor(C/3))`, `ΔP = floor(C/K)` (boosted by
-   Education). The single biggest giver gets a **20% Top Contributor refund**.
-4. **Vote** — every 3 rounds, citizens vote on policy (infrastructure focus, tax,
-   welfare). Votes are weighted by **Influence**, which you earn by contributing
-   and which decays 20% per round.
+   Contributions are revealed only after everyone has locked in, and each
+   citizen's last contribution stays visible in the roster.
+3. **Resolve** — the nation must pool at least a **minimum** (≈35% of total
+   income) or **nothing is built and Prosperity decays**. Above it, the shared
+   pool raises Prosperity efficiently — `K = max(4, 16 − floor(C/3))`,
+   `ΔP = floor(C/K)` (boosted by Education) — and funds the round's project. The
+   single biggest giver gets a **20% Top Contributor refund**.
+4. **Vote** — every 3 rounds, citizens vote on policy (tax, welfare), weighted by
+   **Influence** (earned by contributing, decays 20%/round). The **build focus
+   auto-rotates every round** through the five projects, so construction spreads
+   across the whole nation.
 
 Hit **0 Coins** and you go bankrupt — out of the final ranking. If Prosperity
 ever falls to **0**, society collapses and everyone loses.
@@ -45,11 +49,14 @@ ever falls to **0**, society collapses and everyone loses.
 
 - Personal economy (income, keep/contribute, bankruptcy floor at 0)
 - Prosperity growth with the efficiency curve `K`/`ΔP`
+- **Minimum maintenance threshold** — miss it and nothing is built while
+  Prosperity decays (penalty grows late-game)
 - Top Contributor bonus (20% refund, ties share it)
 - Influence with 20%/round decay and a permanent floor of 1
-- Influence-weighted voting every 3 rounds
+- Influence-weighted voting every 3 rounds (tax & welfare policy)
 - All 5 infrastructure tracks (Roads, Education, Energy, Healthcare, Industry),
-  levels 1–5, funded by contributions toward the voted focus
+  levels 1–5, each with independent progress; the build focus **auto-rotates
+  every round** so construction spreads across the nation
 - Tax (flat / progressive) and welfare / expansion policies
 - Random negative events, mitigated by Healthcare
 - Win at Prosperity 100 → wealth ranking · collapse at Prosperity 0

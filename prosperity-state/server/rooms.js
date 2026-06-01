@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import {
   createGame, beginRound, submitContribution, allContributionsIn, resolveRound,
   shouldVote, startVote, submitVote, allVotesIn, resolveVote,
-  alivePlayers, computeIncome, nextInfraCost,
+  alivePlayers, computeIncome, nextInfraCost, roundThreshold, neglectPenalty, nextFocusCategory,
 } from './engine.js';
 import { decideContribution, decideVote } from './ai.js';
 import { CONFIG, BOT_ARCHETYPES, BOT_NAMES } from './constants.js';
@@ -287,6 +287,7 @@ export class Room {
           submitted: ep.submitted,
           voted: s.pendingVote ? s.pendingVote.votes[ep.id] != null : false,
           contribution: reveal ? ep.contributedThisRound : null,
+          lastContribution: ep.lastContribution, // persists across rounds for display
         };
       });
 
@@ -301,9 +302,12 @@ export class Room {
       income: me && me.alive ? me.income : computeIncome(s),
       infrastructure: s.infrastructure,
       infraFocus: s.infraFocus,
-      infraProgress: s.infraProgress,
-      infraNextCost: nextInfraCost(s, s.infraFocus),
+      infraNextFocus: nextFocusCategory(s),
+      infraProgress: s.infraProgress, // per-category object
+      infraCosts: Object.fromEntries(CONFIG.INFRA_CATEGORIES.map((c) => [c, nextInfraCost(s, c)])),
       infraMaxLevel: CONFIG.INFRA_MAX_LEVEL,
+      roundThreshold: roundThreshold(s),
+      neglectPenalty: neglectPenalty(s),
       taxPolicy: s.taxPolicy,
       welfarePolicy: s.welfarePolicy,
       players,

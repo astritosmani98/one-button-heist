@@ -7,7 +7,7 @@
 // ============================================================================
 
 import { CONFIG } from './constants.js';
-import { alivePlayers } from './engine.js';
+import { alivePlayers, roundThreshold } from './engine.js';
 
 // Base contribution fraction of income, per archetype.
 const BASE_FRACTION = {
@@ -60,7 +60,16 @@ export function decideContribution(state, bot) {
   fraction += (Math.random() - 0.5) * 0.1;
   fraction = clamp(fraction, 0, 1);
 
-  return clamp(Math.round(income * fraction), 0, income);
+  let amount = clamp(Math.round(income * fraction), 0, income);
+
+  // Pull their weight toward the maintenance minimum so the nation keeps building.
+  // Free-riders only do this when collapse is near; everyone else chips in their share.
+  const fairShare = Math.ceil(roundThreshold(state) / Math.max(1, living.length));
+  if (bot.archetype !== 'freerider' || P <= 15) {
+    amount = Math.max(amount, Math.min(income, fairShare));
+  }
+
+  return clamp(amount, 0, income);
 }
 
 /**
