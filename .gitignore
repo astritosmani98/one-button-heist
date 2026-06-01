@@ -6,3 +6,6 @@ Thumbs.db
 .vscode/
 *.suo
 *.user
+
+# Now its own repo: https://github.com/astritosmani98/prosperity-state
+prosperity-state/
